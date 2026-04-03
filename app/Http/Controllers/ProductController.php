@@ -84,12 +84,15 @@ class ProductController extends Controller
                 $customerName = $session->customer->name ?? null;
             }
 
-            $order = Order::where('session_id', $session_id)->where('status', 'unpaid ')->first();
+            $order = Order::where('session_id', $session_id)->first();
             if (!$order) {
                 throw new NotFoundHttpException('Order not found for session ID: ' . $session_id);
             }
-            $order->status = 'paid';
-            $order->save();
+            if ($order && $order->status === 'unpaid') {
+                $order->status = 'paid';
+                $order->save();
+            }
+
 
 
             return view('product.checkout-success', compact('customerName'));
@@ -102,6 +105,52 @@ class ProductController extends Controller
 
     public function cancel(Request $request)
     {
+        $order = Order::where('session_id', 'cs_test_b18hRh4X53yThjQ11JI9OZh4EdXHuzlGF0hbX1aj1t8tY8vNLQ0b6GC7UN')->first();
+        echo '<pre>';
+        var_dump($order);
+        echo '</pre>';
+    }
 
+    public function webhook(Request $request)
+    {
+        $endpoint_secret = config('services.stripe.webhook_secret', env('STRIPE_WEBHOOK_SECRET'));
+
+        $payload = $request->getContent();
+        $sig_header = $request->header('stripe-signature');
+
+        if (!$sig_header) {
+            return response()->json(['Error' => 'Missing stripe-signature header'], 400);
+        }
+
+        try {
+            $event = \Stripe\Webhook::constructEvent(
+                $payload,
+                $sig_header,
+                $endpoint_secret
+            );
+        } catch (\UnexpectedValueException $e) {
+            return response()->json(['Error' => 'Invalid payload'], 400);
+        } catch (\Stripe\Exception\SignatureVerificationException $e) {
+            return response()->json(['Error' => 'Signature verification failed'], 400);
+        }
+
+        // Handle the event
+        switch ($event->type) {
+            case 'checkout.session.completed':
+                $session = $event->data->object;
+                $sessionId = $session->id;
+
+                $order = Order::where('session_id', $sessionId)->first();
+                if ($order && $order->status === 'unpaid') {
+                    $order->status = 'paid';
+                    $order->save();
+                    //send email to customer
+
+                }
+
+                break;
+        }
+
+        return response('Webhook received', 200);
     }
 }
